@@ -1,6 +1,7 @@
-"""
+"""Approximation algorithms for the (unweighted) vertex cover problem.
 """
 
+import random
 import sys
 
 from graph import Graph
@@ -28,6 +29,29 @@ def basic_vertex_cover(graph: Graph) -> set:
     return cover
 
 
+def randomized_vertex_cover(graph: Graph, rng: random.Random) -> set:
+    """
+    Randomized 2-approximation in expectation (Algorithm U, Pitt 1985,
+    Yale TR-404, sec. 3).
+
+    Scans the edges in a fixed order. For each edge with neither endpoint in
+    the cover yet, flips a fair coin and adds ONE endpoint (u or v).
+    Each flip picks a vertex of an optimal cover C with probability >= 1/2,
+    so the expected cover size is at most 2 * |C|.
+
+    Input: an undirected Graph and a seeded random number generator
+           (e.g. random.Random(42)), so runs are reproducible.
+    Output: a set of vertices that covers every edge.
+    Time: O(V + E). Extra space: O(V) for the cover.
+    """
+    cover = set()
+    for u, v in graph.edges:  # step 1: edges in a fixed, arbitrary order
+        if u in cover or v in cover:
+            continue  # step 2: skip edges that are already covered
+        cover.add(rng.choice((u, v)))  # step 3: fair coin picks u or v
+    return cover
+
+
 def is_vertex_cover(graph: Graph, cover: set) -> bool:
     """
     Check whether a set of vertices is a valid vertex cover.
@@ -46,7 +70,11 @@ if __name__ == "__main__":
         sys.exit(1)
 
     g = Graph.from_file(sys.argv[1])
-    result = basic_vertex_cover(g)
     print(f"Vertices: {g.num_vertices}, edges: {g.num_edges}")
-    print(f"Basic cover size: {len(result)}")
-    print(f"Valid cover: {is_vertex_cover(g, result)}")
+
+    basic = basic_vertex_cover(g)
+    print(f"Basic cover size: {len(basic)} (valid: {is_vertex_cover(g, basic)})")
+
+    randomized = randomized_vertex_cover(g, random.Random(42))
+    print(f"Randomized cover size: {len(randomized)} "
+          f"(valid: {is_vertex_cover(g, randomized)})")

@@ -1,8 +1,14 @@
-"""
+"""Unit tests for vertex_cover.py.
 """
 
+import random
+
 from graph import Graph
-from vertex_cover import basic_vertex_cover, is_vertex_cover
+from vertex_cover import (
+    basic_vertex_cover,
+    is_vertex_cover,
+    randomized_vertex_cover,
+)
 
 
 def make_graph(num_vertices, edges):
@@ -97,3 +103,76 @@ def test_basic_is_valid_on_disconnected_graph():
     cover = basic_vertex_cover(g)
     assert cover == {1, 2, 3, 4}
     assert 5 not in cover
+
+
+# ---------- randomized_vertex_cover ----------
+
+SEEDS = range(20)  # many seeds, so every random branch gets exercised
+
+
+def test_randomized_no_edges_gives_empty_cover():
+    """With nothing to cover, the cover is empty."""
+    g = make_graph(4, [])
+    assert randomized_vertex_cover(g, random.Random(0)) == set()
+
+
+def test_randomized_single_edge_takes_exactly_one_endpoint():
+    """One edge: exactly one endpoint is added, never both (Pitt step 3)."""
+    g = make_graph(2, [(1, 2)])
+    for seed in SEEDS:
+        cover = randomized_vertex_cover(g, random.Random(seed))
+        assert len(cover) == 1
+        assert cover <= {1, 2}
+
+
+def test_randomized_single_edge_can_pick_either_endpoint():
+    """Across seeds, both u and v get chosen, so the coin really is used."""
+    g = make_graph(2, [(1, 2)])
+    picks = {frozenset(randomized_vertex_cover(g, random.Random(s)))
+             for s in SEEDS}
+    assert picks == {frozenset({1}), frozenset({2})}
+
+
+def test_randomized_always_returns_valid_cover():
+    """Every run, on several shapes of graph, covers all edges."""
+    graphs = [
+        make_graph(3, [(1, 2), (2, 3), (1, 3)]),                  # triangle
+        make_graph(4, [(1, 2), (2, 3), (3, 4)]),                  # path
+        make_graph(6, [(1, 2), (1, 3), (1, 4), (1, 5), (1, 6)]),  # star
+        make_graph(6, [(u, v) for u in (1, 2, 3) for v in (4, 5, 6)]),  # K(3,3)
+        make_graph(5, [(1, 2), (3, 4)]),                          # disconnected
+    ]
+    for g in graphs:
+        for seed in SEEDS:
+            assert is_vertex_cover(g, randomized_vertex_cover(g, random.Random(seed)))
+
+
+def test_randomized_same_seed_gives_same_cover():
+    """A fixed seed makes the result reproducible."""
+    g = make_graph(6, [(1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 1), (1, 4)])
+    first = randomized_vertex_cover(g, random.Random(7))
+    second = randomized_vertex_cover(g, random.Random(7))
+    assert first == second
+
+
+def test_randomized_adds_one_vertex_per_chosen_edge():
+    """Each uncovered edge adds one vertex, so on disjoint edges size = #edges."""
+    g = make_graph(6, [(1, 2), (3, 4), (5, 6)])
+    for seed in SEEDS:
+        assert len(randomized_vertex_cover(g, random.Random(seed))) == 3
+
+
+def test_randomized_only_uses_vertices_of_the_graph():
+    """The cover never contains isolated vertices or labels outside the graph."""
+    g = make_graph(5, [(1, 2), (2, 3)])  # vertices 4 and 5 are isolated
+    for seed in SEEDS:
+        assert randomized_vertex_cover(g, random.Random(seed)) <= {1, 2, 3}
+
+
+def test_randomized_star_can_find_optimal_cover():
+    """Star: picking the centre covers everything, so some seed finds the
+    optimal cover {1}; no run adds more vertices than there are edges."""
+    g = make_graph(6, [(1, 2), (1, 3), (1, 4), (1, 5), (1, 6)])
+    sizes = [len(randomized_vertex_cover(g, random.Random(s))) for s in SEEDS]
+    assert min(sizes) == 1      # some run finds the optimal cover {1}
+    assert max(sizes) <= 5      # never more vertices than the graph has edges
