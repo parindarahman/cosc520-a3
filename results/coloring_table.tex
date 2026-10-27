@@ -1,0 +1,32 @@
+\begin{table}[t]
+  \caption{Graph coloring results: mean colors used (random-order min--max in brackets), the clique lower bound $K$, and median running time over all runs.}
+  \label{tab:coloring}
+  \small
+  \begin{tabular}{lrrrlrrr}
+    \toprule
+    Graph & $|V|$ & $|E|$ & $K$ & Algorithm & Colors & Colors / $K$ & Median time (ms) \\
+    \midrule
+    frb30-15-1 & 450 & 83198 & 15 & natural & 30.0 & 2.000 & 9.75 \\
+    frb30-15-1 & 450 & 83198 & 15 & random & 88.1 [77--96] & 5.873 & 18.75 \\
+    frb30-15-1 & 450 & 83198 & 15 & smallest last & 48.0 & 3.200 & 50.79 \\
+    frb35-17-1 & 595 & 148859 & 17 & natural & 35.0 & 2.059 & 22.32 \\
+    frb35-17-1 & 595 & 148859 & 17 & random & 113.2 [104--125] & 6.659 & 26.80 \\
+    frb35-17-1 & 595 & 148859 & 17 & smallest last & 61.0 & 3.588 & 88.71 \\
+    frb40-19-1 & 760 & 247106 & 19 & natural & 40.0 & 2.105 & 40.66 \\
+    frb40-19-1 & 760 & 247106 & 19 & random & 136.6 [122--150] & 7.189 & 58.47 \\
+    frb40-19-1 & 760 & 247106 & 19 & smallest last & 59.0 & 3.105 & 164.59 \\
+    frb45-21-1 & 945 & 386854 & 21 & natural & 45.0 & 2.143 & 64.07 \\
+    frb45-21-1 & 945 & 386854 & 21 & random & 170.1 [156--187] & 8.098 & 64.87 \\
+    frb45-21-1 & 945 & 386854 & 21 & smallest last & 72.0 & 3.429 & 188.94 \\
+    frb50-23-1 & 1150 & 580603 & 23 & natural & 50.0 & 2.174 & 71.47 \\
+    frb50-23-1 & 1150 & 580603 & 23 & random & 193.4 [173--210] & 8.410 & 103.92 \\
+    frb50-23-1 & 1150 & 580603 & 23 & smallest last & 67.0 & 2.913 & 289.03 \\
+    frb53-24-1 & 1272 & 714129 & 24 & natural & 53.0 & 2.208 & 93.71 \\
+    frb53-24-1 & 1272 & 714129 & 24 & random & 212.1 [174--230] & 8.839 & 134.43 \\
+    frb53-24-1 & 1272 & 714129 & 24 & smallest last & 90.0 & 3.750 & 373.09 \\
+    frb59-26-1 & 1534 & 1049256 & 26 & natural & 59.0 & 2.269 & 130.32 \\
+    frb59-26-1 & 1534 & 1049256 & 26 & random & 251.8 [226--281] & 9.686 & 216.30 \\
+    frb59-26-1 & 1534 & 1049256 & 26 & smallest last & 84.0 & 3.231 & 605.68 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

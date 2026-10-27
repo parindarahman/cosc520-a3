@@ -1,11 +1,19 @@
-"""Make the report's plots and summary table from the benchmark CSV.
+"""Make the report's plots and summary tables from the benchmark CSVs.
 
-Reads results/vertex_cover_results.csv (written by benchmark.py) and saves,
-in results/plots/, each figure as both .pdf (for Overleaf) and .png:
-  - vc_runtime          median running time vs. graph size |V| + |E|
-  - vc_runtime_per_edge running time divided by |V| + |E| (flat = linear time)
-  - vc_approx_ratio     cover size / optimal cover size for each graph
-It also writes results/vertex_cover_table.tex, a LaTeX table for the report.
+Reads the CSVs written by benchmark.py from the results folder and saves,
+in results/plots/, each figure as both .pdf (for Overleaf) and .png.
+
+Vertex cover (from vertex_cover_results.csv):
+  - vc_runtime              median running time vs. graph size |V| + |E|
+  - vc_runtime_per_edge     running time / (|V| + |E|)  (flat = linear time)
+  - vc_approx_ratio         cover size / optimal cover size per graph
+Graph coloring (from coloring_results.csv):
+  - color_runtime           median running time vs. graph size |V| + |E|
+  - color_runtime_per_edge  running time / (|V| + |E|)  (flat = linear time)
+  - color_count             colors used per graph, with the lower bound K
+It also writes vertex_cover_table.tex and coloring_table.tex for the report.
+A problem whose CSV is missing is skipped.
+
 
 Usage:
     python plot_results.py
@@ -21,29 +29,75 @@ import matplotlib
 matplotlib.use("Agg")  # draw to files only; no window needed
 import matplotlib.pyplot as plt  # noqa: E402
 
-# One fixed colour per algorithm, so a series keeps its colour in every figure.
-ALGORITHM_STYLE = {
-    "basic": {"label": "Basic (VC2)", "color": "#2a78d6", "marker": "o"},
-    "randomized": {"label": "Randomized (Pitt's U)", "color": "#eb6834", "marker": "s"},
-}
 TEXT_COLOR = "#3d3d3a"
 MUTED_COLOR = "#8a8a85"
 GRID_COLOR = "#e4e3df"
 
+# Per-problem settings. Each algorithm keeps one fixed colour and marker in
+# every figure, so a series is recognisable across plots.
+PLOT_CONFIG = {
+    "vertex_cover": {
+        "prefix": "vc",
+        "title": "Vertex cover",
+        "value": "size",
+        "reference": "optimal",
+        "styles": {
+            "basic": {"label": "Basic (VC2)", "color": "#2a78d6", "marker": "o"},
+            "randomized": {"label": "Randomized (Pitt's U)", "color": "#eb6834",
+                           "marker": "s"},
+        },
+        "table": {
+            "caption": "Vertex cover results: mean cover size (randomized min--max "
+                       "in brackets) and median running time over all runs.",
+            "label": "tab:vertex-cover",
+            "reference_header": "OPT",
+            "value_header": "Cover size",
+            "ratio_header": "Size / OPT",
+        },
+    },
+    "coloring": {
+        "prefix": "color",
+        "title": "Graph coloring",
+        "value": "colors",
+        "reference": "lower_bound",
+        "styles": {
+            "natural": {"label": "Greedy, natural order", "color": "#2a78d6",
+                        "marker": "o"},
+            "random": {"label": "Greedy, random order", "color": "#eb6834",
+                       "marker": "s"},
+            "smallest_last": {"label": "Greedy, Smallest Last", "color": "#1baf7a",
+                              "marker": "^"},
+        },
+        "table": {
+            "caption": "Graph coloring results: mean colors used (random-order "
+                       "min--max in brackets), the clique lower bound $K$, and "
+                       "median running time over all runs.",
+            "label": "tab:coloring",
+            "reference_header": "$K$",
+            "value_header": "Colors",
+            "ratio_header": "Colors / $K$",
+        },
+    },
+}
+
+NUMERIC_FIELDS = {"vertices", "edges", "optimal", "lower_bound", "runs",
+                  "time_median_ms", "time_q1_ms", "time_q3_ms", "ratio_mean",
+                  "size_mean", "size_min", "size_max",
+                  "colors_mean", "colors_min", "colors_max"}
+
 
 def read_results(path: str) -> list:
     """
-    Load benchmark rows from the CSV.
+    Load benchmark rows from a CSV.
 
-    Input: path to vertex_cover_results.csv.
-    Output: list of dicts with numeric fields converted to numbers.
+    Input: path to a *_results.csv file.
+    Output: list of dicts with numeric fields converted to numbers
+            (empty cells become None).
     """
-    numeric = {"vertices", "edges", "optimal", "runs", "time_median_ms", "time_q1_ms", "time_q3_ms",
-               "size_mean", "size_min", "size_max", "ratio_mean"}
     rows = []
     with open(path, newline="") as file:
         for row in csv.DictReader(file):
-            for key in numeric:
+            for key in NUMERIC_FIELDS & row.keys():
                 row[key] = float(row[key]) if row[key] != "" else None
             rows.append(row)
     return rows
@@ -77,6 +131,19 @@ def style_axes(ax, title: str, x_label: str, y_label: str) -> None:
     ax.tick_params(colors=MUTED_COLOR, labelcolor=TEXT_COLOR, labelsize=8)
 
 
+def style_category_axis(ax, graph_names: list) -> None:
+    """
+    Set up an x-axis of graph names (one category per graph).
+
+    Input: a matplotlib Axes and the graph names, in plotting order.
+    Output: none; ticks, labels and limits are set in place.
+    """
+    ax.grid(False, axis="x")  # graphs are categories; only value gridlines help
+    ax.set_xlim(-0.5, len(graph_names) - 0.5)
+    ax.set_xticks(range(len(graph_names)))
+    ax.set_xticklabels(graph_names, rotation=30, ha="right")
+
+
 def save_figure(fig, plots_dir: str, name: str) -> None:
     """
     Save a figure as .pdf and .png, then close it.
@@ -91,16 +158,16 @@ def save_figure(fig, plots_dir: str, name: str) -> None:
     print(f"Saved {name}.pdf / .png")
 
 
-def plot_runtime(rows: list, plots_dir: str) -> None:
+def plot_runtime(rows: list, config: dict, plots_dir: str) -> None:
     """
-    Line chart of median running time against |V| + |E| (thousands),
-    with the interquartile range (25th-75th percentile) as error bars.
+    Line chart of median running time against |V| + |E| (thousands), with
+    the interquartile range (25th-75th percentile) as error bars.
 
-    Input: all benchmark rows and the plots folder.
-    Output: none; vc_runtime.pdf/.png are written.
+    Input: one problem's rows, its PLOT_CONFIG entry, and the plots folder.
+    Output: none; <prefix>_runtime.pdf/.png are written.
     """
     fig, ax = plt.subplots(figsize=(6, 3.6))
-    for name, style in ALGORITHM_STYLE.items():
+    for name, style in config["styles"].items():
         data = rows_for(rows, name)
         if not data:
             continue
@@ -111,24 +178,24 @@ def plot_runtime(rows: list, plots_dir: str) -> None:
         ax.errorbar(x, y, yerr=err, color=style["color"], marker=style["marker"],
                     markersize=5, linewidth=2, capsize=3, elinewidth=1,
                     markeredgecolor="white", markeredgewidth=1, label=style["label"])
-    style_axes(ax, "Vertex cover running time vs. graph size",
+    style_axes(ax, f"{config['title']} running time vs. graph size",
                "|V| + |E| (thousands)", "Median running time (ms)")
     ax.set_ylim(bottom=0)
     ax.set_xlim(left=0)
     ax.legend(frameon=False, fontsize=8, labelcolor=TEXT_COLOR)
-    save_figure(fig, plots_dir, "vc_runtime")
+    save_figure(fig, plots_dir, f"{config['prefix']}_runtime")
 
 
-def plot_runtime_per_edge(rows: list, plots_dir: str) -> None:
+def plot_runtime_per_edge(rows: list, config: dict, plots_dir: str) -> None:
     """
     Running time divided by |V| + |E| for each graph. A roughly flat line
     is the empirical sign of O(V + E) time.
 
-    Input: all benchmark rows and the plots folder.
-    Output: none; vc_runtime_per_edge.pdf/.png are written.
+    Input: one problem's rows, its PLOT_CONFIG entry, and the plots folder.
+    Output: none; <prefix>_runtime_per_edge.pdf/.png are written.
     """
     fig, ax = plt.subplots(figsize=(6, 3.6))
-    for name, style in ALGORITHM_STYLE.items():
+    for name, style in config["styles"].items():
         data = rows_for(rows, name)
         if not data:
             continue
@@ -137,80 +204,120 @@ def plot_runtime_per_edge(rows: list, plots_dir: str) -> None:
         ax.plot(x, y, color=style["color"], marker=style["marker"], markersize=5,
                 linewidth=2, markeredgecolor="white", markeredgewidth=1,
                 label=style["label"])
-    style_axes(ax, "Time per element (flat line = linear time)",
+    style_axes(ax, f"{config['title']}: time per element (flat line = linear time)",
                "|V| + |E| (thousands)", "Running time / (|V| + |E|)  (ns)")
     ax.set_ylim(bottom=0)
     ax.set_xlim(left=0)
     ax.legend(frameon=False, fontsize=8, labelcolor=TEXT_COLOR)
-    save_figure(fig, plots_dir, "vc_runtime_per_edge")
+    save_figure(fig, plots_dir, f"{config['prefix']}_runtime_per_edge")
 
 
-def plot_approx_ratio(rows: list, plots_dir: str) -> None:
+def plot_quality_points(ax, rows: list, config: dict, transform) -> list:
     """
-    Cover size divided by the known optimum for each graph. The randomized
-    series shows its mean, with a bar from its best to its worst run.
+    Draw each algorithm's mean result per graph as a point, side by side,
+    with a bar from its best to its worst run when runs differ.
 
-    Input: all benchmark rows and the plots folder.
-    Output: none; vc_approx_ratio.pdf/.png are written (skipped when no
-            graph has a known optimum).
+    Input: an Axes, one problem's rows, its PLOT_CONFIG entry, and a function
+           (row, value) -> y that turns a raw value into the plotted number.
+    Output: the graph names, in plotting order.
     """
-    if not any(r["optimal"] for r in rows):
-        print("No known optimum in the results; skipping vc_approx_ratio.")
-        return
-    fig, ax = plt.subplots(figsize=(6, 3.6))
-    graph_names = [r["graph"] for r in rows_for(rows, "basic") if r["optimal"]]
-    positions = range(len(graph_names))
-    offsets = {"basic": -0.12, "randomized": 0.12}
-    for name, style in ALGORITHM_STYLE.items():
-        data = [r for r in rows_for(rows, name) if r["optimal"]]
+    styles = config["styles"]
+    value = config["value"]
+    first = next(iter(styles))
+    graph_names = [r["graph"] for r in rows_for(rows, first)]
+    spacing = 0.24
+    offsets = {name: (i - (len(styles) - 1) / 2) * spacing for i, name in enumerate(styles)}
+    for name, style in styles.items():
+        data = rows_for(rows, name)
         if not data:
             continue
-        x = [p + offsets[name] for p in positions]
-        y = [r["size_mean"] / r["optimal"] for r in data]
-        low = [yi - r["size_min"] / r["optimal"] for yi, r in zip(y, data)]
-        high = [r["size_max"] / r["optimal"] - yi for yi, r in zip(y, data)]
-        spread = [low, high] if any(low) or any(high) else None  # basic has no spread
+        x = [i + offsets[name] for i in range(len(data))]
+        y = [transform(r, r[f"{value}_mean"]) for r in data]
+        low = [yi - transform(r, r[f"{value}_min"]) for yi, r in zip(y, data)]
+        high = [transform(r, r[f"{value}_max"]) - yi for yi, r in zip(y, data)]
+        spread = [low, high] if any(low) or any(high) else None  # deterministic: none
         ax.errorbar(x, y, yerr=spread, fmt=style["marker"], color=style["color"],
                     markersize=6, capsize=3, elinewidth=1,
                     markeredgecolor="white", markeredgewidth=1, label=style["label"])
+    return graph_names
+
+
+def plot_approx_ratio(rows: list, config: dict, plots_dir: str) -> None:
+    """
+    Vertex cover: cover size divided by the known optimum for each graph.
+
+    Input: the vertex cover rows, its PLOT_CONFIG entry, and the plots folder.
+    Output: none; vc_approx_ratio.pdf/.png are written (skipped when no graph
+            has a known optimum).
+    """
+    rows = [r for r in rows if r["optimal"]]
+    if not rows:
+        print("No known optimum in the results; skipping vc_approx_ratio.")
+        return
+    fig, ax = plt.subplots(figsize=(6, 3.6))
+    graph_names = plot_quality_points(ax, rows, config,
+                                      lambda r, v: v / r["optimal"])
     ax.axhline(1.0, color=MUTED_COLOR, linewidth=1, linestyle="--")
     ax.text(-0.4, 1.0, "optimal", ha="left", va="bottom", fontsize=8, color=MUTED_COLOR)
     style_axes(ax, "Cover size relative to the optimum (lower is better)",
                "Graph", "Cover size / optimal size")
-    ax.grid(False, axis="x")  # graphs are categories; only value gridlines help
-    ax.set_xlim(-0.5, len(graph_names) - 0.5)
-    ax.set_xticks(list(positions))
-    ax.set_xticklabels(graph_names, rotation=30, ha="right")
+    style_category_axis(ax, graph_names)
     ax.legend(frameon=False, fontsize=8, labelcolor=TEXT_COLOR, loc="upper right")
     save_figure(fig, plots_dir, "vc_approx_ratio")
 
 
-def write_latex_table(rows: list, path: str) -> None:
+def plot_color_count(rows: list, config: dict, plots_dir: str) -> None:
+    """
+    Graph coloring: colors used per graph, with the clique lower bound K
+    drawn as a short grey line under each graph.
+
+    Input: the coloring rows, its PLOT_CONFIG entry, and the plots folder.
+    Output: none; color_count.pdf/.png are written.
+    """
+    fig, ax = plt.subplots(figsize=(6, 3.8))
+    graph_names = plot_quality_points(ax, rows, config, lambda r, v: v)
+    bounds = {r["graph"]: r["lower_bound"] for r in rows if r["lower_bound"]}
+    for i, graph in enumerate(graph_names):
+        if graph in bounds:
+            ax.hlines(bounds[graph], i - 0.4, i + 0.4, color=MUTED_COLOR,
+                      linewidth=2, linestyle="--",
+                      label="Lower bound K (clique size)" if i == 0 else None)
+    style_axes(ax, "Colors used per graph (lower is better)", "Graph", "Number of colors")
+    style_category_axis(ax, graph_names)
+    ax.set_ylim(bottom=0)
+    ax.legend(frameon=False, fontsize=8, labelcolor=TEXT_COLOR, loc="upper left")
+    save_figure(fig, plots_dir, "color_count")
+
+
+def write_latex_table(rows: list, config: dict, path: str) -> None:
     """
     Write a booktabs LaTeX table summarising every graph and algorithm.
 
-    Input: all benchmark rows and the output .tex path.
+    Input: one problem's rows, its PLOT_CONFIG entry, and the output .tex path.
     Output: none; the .tex file is written (needs \\usepackage{booktabs}).
     """
+    table, value, reference = config["table"], config["value"], config["reference"]
     lines = [
         r"\begin{table}[t]",
-        r"  \caption{Vertex cover results: mean cover size (randomized min--max in brackets) and median running time over all runs.}",
-        r"  \label{tab:vertex-cover}",
+        f"  \\caption{{{table['caption']}}}",
+        f"  \\label{{{table['label']}}}",
         r"  \small",
         r"  \begin{tabular}{lrrrlrrr}",
         r"    \toprule",
-        r"    Graph & $|V|$ & $|E|$ & OPT & Algorithm & Cover size & Ratio & Median time (ms) \\",
+        f"    Graph & $|V|$ & $|E|$ & {table['reference_header']} & Algorithm & "
+        f"{table['value_header']} & {table['ratio_header']} & Median time (ms) \\\\",
         r"    \midrule",
     ]
     for row in sorted(rows, key=lambda r: (r["vertices"] + r["edges"], r["algorithm"])):
-        size = f"{row['size_mean']:.1f}"
-        if row["size_min"] != row["size_max"]:
-            size += f" [{row['size_min']:.0f}--{row['size_max']:.0f}]"
-        optimal = f"{row['optimal']:.0f}" if row["optimal"] else "--"
+        result = f"{row[f'{value}_mean']:.1f}"
+        if row[f"{value}_min"] != row[f"{value}_max"]:
+            result += f" [{row[f'{value}_min']:.0f}--{row[f'{value}_max']:.0f}]"
+        ref = f"{row[reference]:.0f}" if row[reference] else "--"
         ratio = f"{row['ratio_mean']:.3f}" if row["ratio_mean"] else "--"
+        algorithm = row["algorithm"].replace("_", " ")
         lines.append(
-            f"    {row['graph']} & {row['vertices']:.0f} & {row['edges']:.0f} & {optimal} & "
-            f"{row['algorithm']} & {size} & {ratio} & {row['time_median_ms']:.2f} \\\\"
+            f"    {row['graph']} & {row['vertices']:.0f} & {row['edges']:.0f} & {ref} & "
+            f"{algorithm} & {result} & {ratio} & {row['time_median_ms']:.2f} \\\\"
         )
     lines += [r"    \bottomrule", r"  \end{tabular}", r"\end{table}"]
     with open(path, "w") as file:
@@ -218,22 +325,31 @@ def write_latex_table(rows: list, path: str) -> None:
     print(f"Saved {os.path.basename(path)}")
 
 
-def main() -> None:
-    """Parse command-line options, then make every plot and the table."""
-    parser = argparse.ArgumentParser(description="Plot vertex cover benchmark results.")
-    parser.add_argument("--results", default="results", help="folder holding the CSV")
-    args = parser.parse_args()
+QUALITY_PLOTS = {"vertex_cover": plot_approx_ratio, "coloring": plot_color_count}
 
-    csv_path = os.path.join(args.results, "vertex_cover_results.csv")
-    if not os.path.exists(csv_path):
-        raise SystemExit(f"'{csv_path}' not found. Run benchmark.py first.")
-    rows = read_results(csv_path)
+
+def main() -> None:
+    """Parse command-line options, then make every plot and table."""
+    parser = argparse.ArgumentParser(description="Plot benchmark results.")
+    parser.add_argument("--results", default="results", help="folder holding the CSVs")
+    args = parser.parse_args()
     plots_dir = os.path.join(args.results, "plots")
 
-    plot_runtime(rows, plots_dir)
-    plot_runtime_per_edge(rows, plots_dir)
-    plot_approx_ratio(rows, plots_dir)
-    write_latex_table(rows, os.path.join(args.results, "vertex_cover_table.tex"))
+    found_any = False
+    for problem_name, config in PLOT_CONFIG.items():
+        csv_path = os.path.join(args.results, f"{problem_name}_results.csv")
+        if not os.path.exists(csv_path):
+            print(f"'{csv_path}' not found; skipping {problem_name}.")
+            continue
+        found_any = True
+        rows = read_results(csv_path)
+        plot_runtime(rows, config, plots_dir)
+        plot_runtime_per_edge(rows, config, plots_dir)
+        QUALITY_PLOTS[problem_name](rows, config, plots_dir)
+        write_latex_table(rows, config,
+                          os.path.join(args.results, f"{problem_name}_table.tex"))
+    if not found_any:
+        raise SystemExit("No results CSVs found. Run benchmark.py first.")
 
 
 if __name__ == "__main__":
